@@ -1,0 +1,247 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#install.packages("rjson")
+#install.packages("naivebayes")
+
+```
+
+```{r}
+library(tidyverse)
+library(caTools)
+library(ggplot2)
+library(readr)
+library(rjson)
+library(jsonlite)
+library(tidyr)
+library(naivebayes)
+library(dplyr)
+library(psych)
+library(plotly)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(neuralnet)
+```
+
+```{r}
+school <- read_csv("/Users/tobiasrodriguezbrindicci/Desktop/CIS546 - 22SP2/Final Project/Data/universities.csv")
+View(school)
+```
+
+```{r}
+df <- school[, c(1, 5, 8:10, 12, 14, 16:18, 20, 29, 31, 37)]
+view(df)
+```
+
+```{r}
+cols_to_check = c("act_avg", "sat_avg", "binary")
+
+df$binaryPrivPub <- ifelse(df$institutionalControl=="private", 1, 0)
+df$binary <- ifelse(df$institutionalControl=="private", 1, 0)
+df2 <- df %>% 
+  filter(if_all(cols_to_check, ~ !is.na(.x)))
+```
+
+#Visualizations
+```{r}
+ggplot(df, aes(x=tuition, color=institutionalControl, fill=institutionalControl, group=institutionalControl)) +
+  geom_density(alpha=0.3) +
+  theme_light(base_size=16) + 
+  theme(axis.text.y=element_blank(),
+        axis.ticks.y=element_blank() 
+        ) +
+  xlab("Tuition Cost") + ylab("")
+```
+
+```{r}
+ggplot(data = df,
+            mapping = aes(x = state, y = enrollment)) + 
+  geom_col() +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = "Enrollment by State", x = "State", y = "Enrollment")
+```
+
+
+#Creating new dataframe for Machine Learning
+```{r}
+#Find Min, Max, and Avg 
+min(df2$act_avg)
+max(df2$act_avg)
+mean(df2$act_avg)
+
+min(df2$sat_avg)
+max(df2$sat_avg)
+mean(df2$sat_avg)
+```
+
+
+```{r}
+#Create new dataframe with random numbers and compare to avg test results 
+act_avg2 <- runif(100, min=15, max=34)
+sat_avg2 <- runif(100, min=715, max=1510)
+
+newdf <- data.frame(sat_avg2, act_avg2)
+
+newdf$placed <- ifelse(sat_avg2>= 1045.32 & act_avg2>=23.1, 1,0)
+```
+
+##Artificial Neural Network
+```{r}
+#install.packages("neuralnet")
+library(neuralnet)
+```
+
+```{r}
+set.seed(123)
+
+sample<- sample.split(newdf$act_avg2, SplitRatio = .75)
+train <- subset(newdf, sample == TRUE)
+test <- subset(newdf, sample == FALSE)
+```
+
+```{r}
+nn=neuralnet(placed~act_avg2+sat_avg2,data=test, hidden=3,act.fct = "logistic",
+                linear.output = TRUE)
+plot(nn)
+```
+
+```{r}
+act_avg3 <- c(1320, 976, 1134)
+sat_avg3 <- c(25, 21, 30)
+
+test2 <- data.frame(sat_avg3, act_avg3)
+
+Predict=compute(nn,test2)
+Predict$net.result
+```
+
+
+##Naive Bayes
+```{r}
+#Change all acceptance rate NA values to 100 if NA 
+df$acceptance_rate[is.na(df$acceptance_rate)] = 100
+
+#Find mean acceptance rate(AR) and create a binary column: 1 if AR is higher than mean, 0 if lower
+mean(df$acceptance_rate)
+df$ARbinary <- ifelse(df$acceptance_rate>= 61, 1,0) 
+```
+
+```{r}
+df$binaryPrivPub <- as.factor(df$binaryPrivPub)
+
+#Visualizing Data
+ar <- df %>%
+         ggplot(aes(x=binaryPrivPub, y=acceptance_rate, fill = binaryPrivPub)) +
+         geom_boxplot() +
+          theme_bw()+
+         labs(title = "Acceptance Rate in Public and Private Schools",
+              y = "Acceptance Rate",
+              x = "Public or Private")
+ggplotly(ar)
+```
+
+```{r}
+#Visualizing data
+sat <- df %>%
+         ggplot(aes(x=binaryPrivPub, y=sat_avg, fill = df$binaryPrivPub)) +
+         geom_boxplot() +
+          theme_bw()+
+         labs(title = "SAT Score in Public and Private Schools",
+              y = "SAT Score",
+              x = "Public or Private")
+ggplotly(sat)
+```
+
+```{r}
+#Visualizing data
+act <- df %>%
+         ggplot(aes(x=binaryPrivPub, y=act_avg, fill = df$binaryPrivPub)) +
+         geom_boxplot() +
+          theme_bw()+
+         labs(title = "SAT Score in Public and Private Schools",
+              y = "ACT Score",
+              x = "Public or Private")
+ggplotly(act)
+```
+
+```{r}
+#Visualizing data
+enrol <- df %>%
+         ggplot(aes(x=binaryPrivPub, y=enrollment, fill = df$binaryPrivPub)) +
+         geom_boxplot() +
+          theme_bw()+
+         labs(title = "Enrollment in Public and Private Schools",
+              y = "Enrollment",
+              x = "Public or Private")
+ggplotly(enrol)
+```
+
+```{r}
+#Create test and train for the model
+set.seed(123)
+
+sample<- sample.split(df$act_avg, SplitRatio = .75)
+train <- subset(df, sample == TRUE)
+test <- subset(df, sample == FALSE)
+```
+
+```{r}
+#Naive Bayes Model
+model <- naive_bayes(binaryPrivPub ~ acceptance_rate + act_avg + sat_avg + enrollment, data = train, usekernel = T) 
+plot(model) 
+```
+
+```{r}
+
+nb <- predict(model, train, type = 'prob')
+head(cbind(nb, train))
+```
+
+
+##Decision Trees
+```{r}
+modelDF <- df[, c("sat_avg", "act_avg", "enrollment", "acceptance_rate", "binaryPrivPub")]
+head(modelDF)
+
+#Create test and train for the model
+set.seed(123)
+
+sample<- sample.split(modelDF$act_avg, SplitRatio = .75)
+train <- subset(modelDF, sample == TRUE)
+test <- subset(modelDF, sample == FALSE)
+```
+
+```{r}
+#CART Tree
+cartTreeModel <- rpart(binaryPrivPub ~., data = train)
+cartTreeModel
+```
+```{r}
+varorder <- c("tuition", "enrollment", "sat_avg")
+treemodel <- rpart(binaryPrivPub ~ ., data = train, cp = .02)
+rpart.plot(treemodel, extra = 3, under = F)
+rpart.rules(treemodel)
+
+```
+
+##SVM
+```{r}
+#Support vector machines (SVM) are supervised learning models with associated learning algorithms that analyze data used for classification and regression analysis. It is mostly used in classification problems.
+
+
+```
+
+
+
+
+
+
+
+
+
+
